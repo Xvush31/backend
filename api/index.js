@@ -135,12 +135,10 @@ app.put("/api/creators/:id/conditions", async (req, res) => {
     const now = new Date();
     const daysSinceJoin = (now - joinDate) / (1000 * 60 * 60 * 24); // Convertir en jours
     if (daysSinceJoin > 10) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "La période de 10 jours pour remplir les conditions est dépassée",
-        });
+      return res.status(400).json({
+        error:
+          "La période de 10 jours pour remplir les conditions est dépassée",
+      });
     }
 
     // Mettre à jour les compteurs dans creator_conditions
@@ -501,5 +499,13 @@ const sendEarlyBirdReminders = async () => {
   console.log("Fin de sendEarlyBirdReminders:", new Date().toISOString());
 };
 
+const cors = require("cors");
+app.use(
+  cors({
+    origin: ["https://xvush-frontend.vercel.app", "https://xvush.com"],
+    methods: ["GET", "POST", "PUT"],
+    credentials: true,
+  })
+);
 // Exporter l'application pour Vercel
 module.exports = app;
