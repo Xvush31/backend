@@ -1,199 +1,169 @@
-import React, { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
-import Logo from "@/components/Logo";
-import { GoogleLogin } from '@react-oauth/google';
-import AppleLogin from 'react-apple-login';
-import { useAuth } from "../contexts/AuthContext";
+const express = require("express");
+const mysql = require("mysql2/promise");
+const jwt = require("jsonwebtoken");
+const { OAuth2Client } = require("google-auth-library");
 
-const Login: React.FC = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [rememberMe, setRememberMe] = useState(false);
-  const navigate = useNavigate();
-  const { login } = useAuth();
+const router = express.Router();
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    try {
-      const response = await fetch('https://backend-puce-rho-15.vercel.app/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        login(data.token, data.role); // Passe le rôle au contexte
-        if (rememberMe) {
-          localStorage.setItem('token', data.token);
-          localStorage.setItem('role', data.role);
-        }
-        navigate(data.role === 'creator' ? '/creator-dashboard' : '/');
-      } else {
-        setError(data.error || 'Email ou mot de passe incorrect');
-      }
-    } catch (error) {
-      setError('Erreur réseau. Veuillez réessayer.');
-      console.error('Erreur réseau:', error);
+// Configuration de la base de données
+const pool = mysql.createPool({
+  host: process.env.MYSQL_HOST,
+  user: process.env.MYSQL_USER,
+  password: process.env.MYSQL_PASSWORD,
+  database: process.env.MYSQL_DATABASE,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+});
+
+// Clé secrète pour JWT (à stocker dans une variable d’environnement)
+const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret_key";
+
+// Client Google pour vérifier les tokens Google
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+// Route pour l'inscription
+router.post("/signup", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email et mot de passe requis" });
     }
-  };
 
-  const handleGoogleSuccess = async (response: any) => {
-    try {
-      const res = await fetch('https://backend-puce-rho-15.vercel.app/api/auth/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: response.credential }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        login(data.token, data.role);
-        if (rememberMe) {
-          localStorage.setItem('token', data.token);
-          localStorage.setItem('role', data.role);
-        }
-        navigate(data.role === 'creator' ? '/creator-dashboard' : '/');
-      } else {
-        setError('Erreur lors de la connexion avec Google');
-      }
-    } catch (error) {
-      setError('Erreur réseau');
-      console.error('Erreur réseau:', error);
+    // Vérifier si l'email existe déjà
+    const [existingUser] = await pool.query(
+      "SELECT * FROM users WHERE email = ?",
+      [email]
+    );
+    if (existingUser.length > 0) {
+      return res.status(400).json({ error: "Cet email est déjà utilisé" });
     }
-  };
 
-  const handleGoogleFailure = () => {
-    setError('Échec de la connexion avec Google');
-  };
+    // Insérer le nouvel utilisateur (par défaut, rôle 'user')
+    await pool.query(
+      "INSERT INTO users (email, password, role) VALUES (?, ?, ?)",
+      [email, password, "user"]
+    );
 
-  const handleAppleResponse = async (response: any) => {
-    try {
-      const res = await fetch('https://backend-puce-rho-15.vercel.app/api/auth/apple', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(response),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        login(data.token, data.role);
-        if (rememberMe) {
-          localStorage.setItem('token', data.token);
-          localStorage.setItem('role', data.role);
-        }
-        navigate(data.role === 'creator' ? '/creator-dashboard' : '/');
-      } else {
-        setError('Erreur lors de la connexion avec Apple');
-      }
-    } catch (error) {
-      setError('Erreur réseau');
-      console.error('Erreur réseau:', error);
+    res.status(200).json({ message: "Utilisateur créé" });
+  } catch (error) {
+    console.error("Erreur lors de l’inscription:", error);
+    res.status(500).json({ error: "Erreur lors de l’inscription" });
+  }
+});
+
+// Route pour la connexion email/mot de passe
+router.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email et mot de passe requis" });
     }
-  };
 
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <div className="w-full max-w-md space-y-8">
-        <div className="text-center">
-          <div className="flex justify-center mb-4">
-            <Logo />
-          </div>
-          <h1 className="text-2xl font-bold">Connectez-vous à votre compte</h1>
-          <p className="text-muted-foreground mt-2">
-            Bienvenue. Veuillez vous connecter pour continuer.
-          </p>
-        </div>
+    const [user] = await pool.query(
+      "SELECT * FROM users WHERE email = ? AND password = ?",
+      [email, password]
+    );
+    if (user.length === 0) {
+      return res.status(401).json({ error: "Email ou mot de passe incorrect" });
+    }
 
-        <div className="bg-card rounded-lg shadow-lg p-6 border border-border">
-          {error && <p className="text-red-500 text-center mb-4">{error}</p>}
-          <form className="space-y-6" onSubmit={handleLogin}>
-            <div className="space-y-2">
-              <label htmlFor="email" className="text-sm font-medium">Email</label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="votre@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
+    const token = jwt.sign(
+      { email: user[0].email, role: user[0].role },
+      JWT_SECRET,
+      { expiresIn: "1h" }
+    );
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label htmlFor="password" className="text-sm font-medium">Mot de passe</label>
-                <Link to="/forgot-password" className="text-xs text-brand-accent hover:underline">
-                  Mot de passe oublié ?
-                </Link>
-              </div>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
+    res.json({ success: true, token, role: user[0].role });
+  } catch (error) {
+    console.error("Erreur lors de la connexion:", error);
+    res.status(500).json({ error: "Erreur lors de la connexion" });
+  }
+});
 
-            <div className="flex items-center">
-              <Checkbox
-                id="remember"
-                checked={rememberMe}
-                onCheckedChange={(checked: boolean) => setRememberMe(checked)}
-              />
-              <label htmlFor="remember" className="ml-2 text-sm">
-                Se souvenir de moi
-              </label>
-            </div>
+// Route pour Google
+router.post("/google", async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ error: "Token requis" });
+    }
 
-            <Button type="submit" className="w-full">
-              Se connecter
-            </Button>
-          </form>
+    const ticket = await googleClient.verifyIdToken({
+      idToken: token,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const email = payload["email"];
 
-          <div className="relative my-6">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-muted"></div>
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-card px-2 text-muted-foreground">ou</span>
-            </div>
-          </div>
+    // Vérifier si l'utilisateur existe
+    let [user] = await pool.query("SELECT * FROM users WHERE email = ?", [
+      email,
+    ]);
+    if (user.length === 0) {
+      // Créer un nouvel utilisateur (par défaut, rôle 'user')
+      await pool.query(
+        "INSERT INTO users (email, password, role) VALUES (?, ?, ?)",
+        [email, null, "user"]
+      );
+      [user] = await pool.query("SELECT * FROM users WHERE email = ?", [email]);
+    }
 
-          <div className="space-y-3">
-            <GoogleLogin
-              onSuccess={handleGoogleSuccess}
-              onError={handleGoogleFailure}
-              buttonText="Continuer avec Google"
-              width="100%"
-            />
-            <AppleLogin
-              clientId="com.xvush.signin"
-              redirectURI="https://xvush.com/auth/apple/callback"
-              onSuccess={handleAppleResponse}
-              onFailure={(error: any) => setError('Échec de la connexion avec Apple')}
-              render={(renderProps: any) => (
-                <Button variant="outline" className="w-full" onClick={renderProps.onClick}>
-                  Continuer avec Apple
-                </Button>
-              )}
-            />
-          </div>
-        </div>
+    const jwtToken = jwt.sign(
+      { email: user[0].email, role: user[0].role },
+      JWT_SECRET,
+      { expiresIn: "1h" }
+    );
 
-        <p className="text-center text-sm text-muted-foreground">
-          Pas encore de compte ?{" "}
-          <Link to="/signup" className="font-medium text-brand-accent hover:underline">
-            Inscrivez-vous
-          </Link>
-        </p>
-      </div>
-    </div>
-  );
-};
+    res.json({ success: true, token: jwtToken, role: user[0].role });
+  } catch (error) {
+    console.error("Erreur lors de la connexion Google:", error);
+    res.status(401).json({ error: "Échec de l’authentification Google" });
+  }
+});
 
-export default Login;
+// Route pour Apple
+router.post("/apple", async (req, res) => {
+  try {
+    const { authorization } = req.body;
+    if (!authorization || !authorization.id_token) {
+      return res.status(400).json({ error: "Token Apple requis" });
+    }
+
+    // Vérification simplifiée du token Apple (à améliorer avec une vraie vérification)
+    const decoded = jwt.decode(authorization.id_token);
+    const email = decoded.email;
+
+    if (!email) {
+      return res
+        .status(400)
+        .json({ error: "Email non trouvé dans le token Apple" });
+    }
+
+    // Vérifier si l'utilisateur existe
+    let [user] = await pool.query("SELECT * FROM users WHERE email = ?", [
+      email,
+    ]);
+    if (user.length === 0) {
+      // Créer un nouvel utilisateur (par défaut, rôle 'user')
+      await pool.query(
+        "INSERT INTO users (email, password, role) VALUES (?, ?, ?)",
+        [email, null, "user"]
+      );
+      [user] = await pool.query("SELECT * FROM users WHERE email = ?", [email]);
+    }
+
+    const jwtToken = jwt.sign(
+      { email: user[0].email, role: user[0].role },
+      JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    res.json({ success: true, token: jwtToken, role: user[0].role });
+  } catch (error) {
+    console.error("Erreur lors de la connexion Apple:", error);
+    res.status(500).json({ error: "Erreur lors de l’authentification Apple" });
+  }
+});
+
+module.exports = router;
