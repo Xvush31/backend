@@ -1,6 +1,7 @@
 const express = require("express");
 const mysql = require("mysql2/promise");
 const TronWeb = require("tronweb");
+const { OAuth2Client } = require("google-auth-library");
 require("dotenv").config();
 
 const app = express();
@@ -30,8 +31,21 @@ const tronWeb = new TronWeb(
   process.env.TRON_PRIVATE_KEY
 );
 
+// Configuration de Google Auth
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
 // Middleware pour parser les requêtes JSON
 app.use(express.json());
+
+// Configuration de CORS
+const cors = require("cors");
+app.use(
+  cors({
+    origin: ["https://xvush-frontend.vercel.app", "https://xvush.com"],
+    methods: ["GET", "POST", "PUT"],
+    credentials: true,
+  })
+);
 
 // Route de test
 app.get("/", (req, res) => {
@@ -499,13 +513,129 @@ const sendEarlyBirdReminders = async () => {
   console.log("Fin de sendEarlyBirdReminders:", new Date().toISOString());
 };
 
-const cors = require("cors");
-app.use(
-  cors({
-    origin: ["https://xvush-frontend.vercel.app", "https://xvush.com"],
-    methods: ["GET", "POST", "PUT"],
-    credentials: true,
-  })
-);
+// Routes d'authentification
+
+// Route pour l'inscription
+app.post("/api/auth/signup", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email et mot de passe requis" });
+    }
+
+    // Vérifier si l'email existe déjà
+    const [existingUser] = await pool.query(
+      "SELECT * FROM users WHERE email = ?",
+      [email]
+    );
+    if (existingUser.length > 0) {
+      return res.status(400).json({ error: "Cet email est déjà utilisé" });
+    }
+
+    // Insérer le nouvel utilisateur (par défaut, rôle 'user')
+    await pool.query(
+      "INSERT INTO users (email, password, role) VALUES (?, ?, ?)",
+      [email, password, "user"]
+    );
+
+    res.json({ success: true, token: "fake-jwt-token", role: "user" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erreur lors de l’inscription" });
+  }
+});
+
+// Route pour la connexion email/mot de passe
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email et mot de passe requis" });
+    }
+
+    const [user] = await pool.query(
+      "SELECT * FROM users WHERE email = ? AND password = ?",
+      [email, password]
+    );
+    if (user.length === 0) {
+      return res.status(401).json({ error: "Email ou mot de passe incorrect" });
+    }
+
+    res.json({ success: true, token: "fake-jwt-token", role: user[0].role });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erreur lors de la connexion" });
+  }
+});
+
+// Route pour Google
+app.post("/api/auth/google", async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ error: "Token requis" });
+    }
+
+    const ticket = await client.verifyIdToken({
+      idToken: token,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const email = payload["email"];
+
+    // Vérifier si l'utilisateur existe
+    let [user] = await pool.query("SELECT * FROM users WHERE email = ?", [
+      email,
+    ]);
+    if (user.length === 0) {
+      // Créer un nouvel utilisateur (par défaut, rôle 'user')
+      await pool.query(
+        "INSERT INTO users (email, password, role) VALUES (?, ?, ?)",
+        [email, null, "user"]
+      );
+      [user] = await pool.query("SELECT * FROM users WHERE email = ?", [email]);
+    }
+
+    res.json({ success: true, token: "fake-jwt-token", role: user[0].role });
+  } catch (error) {
+    console.error(error);
+    res.status(401).json({ error: "Échec de l’authentification Google" });
+  }
+});
+
+// Route pour Apple
+app.post("/api/auth/apple", async (req, res) => {
+  try {
+    const { email } = req.body; // À ajuster selon les données Apple
+    if (!email) {
+      return res.status(400).json({ error: "Email requis" });
+    }
+
+    // Vérifier si l'utilisateur existe
+    let [user] = await pool.query("SELECT * FROM users WHERE email = ?", [
+      email,
+    ]);
+    if (user.length === 0) {
+      // Créer un nouvel utilisateur (par défaut, rôle 'user')
+      await pool.query(
+        "INSERT INTO users (email, password, role) VALUES (?, ?, ?)",
+        [email, null, "user"]
+      );
+      [user] = await pool.query("SELECT * FROM users WHERE email = ?", [email]);
+    }
+
+    res.json({ success: true, token: "fake-jwt-token", role: user[0].role });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erreur lors de l’authentification Apple" });
+  }
+});
+
+// Gestion des erreurs globales
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ error: "Erreur serveur" });
+});
+
 // Exporter l'application pour Vercel
 module.exports = app;
