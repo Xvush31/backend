@@ -2,10 +2,11 @@ const express = require("express");
 const mysql = require("mysql2/promise");
 const jwt = require("jsonwebtoken");
 const { OAuth2Client } = require("google-auth-library");
+require("dotenv").config();
 
 const router = express.Router();
 
-// Configuration de la base de données
+// Connexion à MySQL
 const pool = mysql.createPool({
   host: process.env.MYSQL_HOST,
   user: process.env.MYSQL_USER,
@@ -16,13 +17,16 @@ const pool = mysql.createPool({
   queueLimit: 0,
 });
 
-// Clé secrète pour JWT (à stocker dans une variable d’environnement)
-const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret_key";
+// Vérifier la connexion à MySQL
+pool
+  .getConnection()
+  .then(() => console.log("Connecté à MySQL (routes/auth)"))
+  .catch((err) => console.error("Erreur MySQL (routes/auth):", err));
 
-// Client Google pour vérifier les tokens Google
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+// Client Google OAuth
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// Route pour l'inscription
+// Route pour l’inscription
 router.post("/signup", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -30,7 +34,7 @@ router.post("/signup", async (req, res) => {
       return res.status(400).json({ error: "Email et mot de passe requis" });
     }
 
-    // Vérifier si l'email existe déjà
+    // Vérifier si l’utilisateur existe déjà
     const [existingUser] = await pool.query(
       "SELECT * FROM users WHERE email = ?",
       [email]
@@ -45,14 +49,14 @@ router.post("/signup", async (req, res) => {
       [email, password, "user"]
     );
 
-    res.status(200).json({ message: "Utilisateur créé" });
+    res.status(201).json({ message: "Utilisateur créé" });
   } catch (error) {
-    console.error("Erreur lors de l’inscription:", error);
+    console.error(error);
     res.status(500).json({ error: "Erreur lors de l’inscription" });
   }
 });
 
-// Route pour la connexion email/mot de passe
+// Route pour la connexion
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -64,39 +68,42 @@ router.post("/login", async (req, res) => {
       "SELECT * FROM users WHERE email = ? AND password = ?",
       [email, password]
     );
+
     if (user.length === 0) {
       return res.status(401).json({ error: "Email ou mot de passe incorrect" });
     }
 
+    // Générer un token JWT
     const token = jwt.sign(
       { email: user[0].email, role: user[0].role },
-      JWT_SECRET,
+      process.env.JWT_SECRET,
       { expiresIn: "1h" }
     );
 
     res.json({ success: true, token, role: user[0].role });
   } catch (error) {
-    console.error("Erreur lors de la connexion:", error);
+    console.error(error);
     res.status(500).json({ error: "Erreur lors de la connexion" });
   }
 });
 
-// Route pour Google
+// Route pour l’authentification Google
 router.post("/google", async (req, res) => {
   try {
     const { token } = req.body;
     if (!token) {
-      return res.status(400).json({ error: "Token requis" });
+      return res.status(400).json({ error: "Token Google requis" });
     }
 
-    const ticket = await googleClient.verifyIdToken({
+    // Vérifier le token Google
+    const ticket = await client.verifyIdToken({
       idToken: token,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
     const payload = ticket.getPayload();
     const email = payload["email"];
 
-    // Vérifier si l'utilisateur existe
+    // Vérifier si l’utilisateur existe
     let [user] = await pool.query("SELECT * FROM users WHERE email = ?", [
       email,
     ]);
@@ -109,38 +116,29 @@ router.post("/google", async (req, res) => {
       [user] = await pool.query("SELECT * FROM users WHERE email = ?", [email]);
     }
 
+    // Générer un token JWT
     const jwtToken = jwt.sign(
       { email: user[0].email, role: user[0].role },
-      JWT_SECRET,
+      process.env.JWT_SECRET,
       { expiresIn: "1h" }
     );
 
     res.json({ success: true, token: jwtToken, role: user[0].role });
   } catch (error) {
-    console.error("Erreur lors de la connexion Google:", error);
-    res.status(401).json({ error: "Échec de l’authentification Google" });
+    console.error(error);
+    res.status(500).json({ error: "Erreur lors de l’authentification Google" });
   }
 });
 
-// Route pour Apple
+// Route pour l’authentification Apple
 router.post("/apple", async (req, res) => {
   try {
-    const { authorization } = req.body;
-    if (!authorization || !authorization.id_token) {
-      return res.status(400).json({ error: "Token Apple requis" });
-    }
-
-    // Vérification simplifiée du token Apple (à améliorer avec une vraie vérification)
-    const decoded = jwt.decode(authorization.id_token);
-    const email = decoded.email;
-
+    const { email } = req.body; // À ajuster selon les données Apple
     if (!email) {
-      return res
-        .status(400)
-        .json({ error: "Email non trouvé dans le token Apple" });
+      return res.status(400).json({ error: "Email requis" });
     }
 
-    // Vérifier si l'utilisateur existe
+    // Vérifier si l’utilisateur existe
     let [user] = await pool.query("SELECT * FROM users WHERE email = ?", [
       email,
     ]);
@@ -153,15 +151,16 @@ router.post("/apple", async (req, res) => {
       [user] = await pool.query("SELECT * FROM users WHERE email = ?", [email]);
     }
 
-    const jwtToken = jwt.sign(
+    // Générer un token JWT
+    const token = jwt.sign(
       { email: user[0].email, role: user[0].role },
-      JWT_SECRET,
+      process.env.JWT_SECRET,
       { expiresIn: "1h" }
     );
 
-    res.json({ success: true, token: jwtToken, role: user[0].role });
+    res.json({ success: true, token, role: user[0].role });
   } catch (error) {
-    console.error("Erreur lors de la connexion Apple:", error);
+    console.error(error);
     res.status(500).json({ error: "Erreur lors de l’authentification Apple" });
   }
 });
