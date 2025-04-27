@@ -515,7 +515,7 @@ const sendEarlyBirdReminders = async () => {
     console.error("Erreur lors de l'envoi des rappels Early Bird:", error);
   }
   console.log("Fin de sendEarlyBirdReminders:", new Date().toISOString());
-});
+};
 
 // Gestion des erreurs globales
 app.use((err, req, res, next) => {
