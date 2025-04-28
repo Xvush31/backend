@@ -1,5 +1,5 @@
 const express = require("express");
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs"); // Use bcryptjs instead of bcrypt
 const jwt = require("jsonwebtoken");
 const mysql = require("mysql2/promise");
 
@@ -45,7 +45,7 @@ router.post("/signup", async (req, res) => {
       return res.status(400).json({ error: "Cet email est déjà utilisé" });
     }
 
-    // Hash the password
+    // Hash the password using bcryptjs
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Insert the new user with the specified role
@@ -79,6 +79,7 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Email ou mot de passe incorrect" });
     }
 
+    // Compare password using bcryptjs
     const isMatch = await bcrypt.compare(password, user[0].password);
     if (!isMatch) {
       return res.status(401).json({ error: "Email ou mot de passe incorrect" });
