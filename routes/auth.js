@@ -1,6 +1,7 @@
 const express = require("express");
 const mysql = require("mysql2/promise");
 const jwt = require("jsonwebtoken");
+const bcrypt = require("bcrypt"); // Ajoute bcrypt
 const { OAuth2Client } = require("google-auth-library");
 require("dotenv").config();
 
@@ -43,10 +44,13 @@ router.post("/signup", async (req, res) => {
       return res.status(400).json({ error: "Cet email est déjà utilisé" });
     }
 
+    // Hacher le mot de passe
+    const hashedPassword = await bcrypt.hash(password, 10);
+
     // Insérer le nouvel utilisateur (par défaut, rôle 'user')
     await pool.query(
       "INSERT INTO users (email, password, role) VALUES (?, ?, ?)",
-      [email, password, "user"]
+      [email, hashedPassword, "user"]
     );
 
     res.status(201).json({ message: "Utilisateur créé" });
@@ -64,12 +68,17 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ error: "Email et mot de passe requis" });
     }
 
-    const [user] = await pool.query(
-      "SELECT * FROM users WHERE email = ? AND password = ?",
-      [email, password]
-    );
+    const [user] = await pool.query("SELECT * FROM users WHERE email = ?", [
+      email,
+    ]);
 
     if (user.length === 0) {
+      return res.status(401).json({ error: "Email ou mot de passe incorrect" });
+    }
+
+    // Vérifier le mot de passe
+    const isMatch = await bcrypt.compare(password, user[0].password);
+    if (!isMatch) {
       return res.status(401).json({ error: "Email ou mot de passe incorrect" });
     }
 
@@ -133,7 +142,7 @@ router.post("/google", async (req, res) => {
 // Route pour l’authentification Apple
 router.post("/apple", async (req, res) => {
   try {
-    const { email } = req.body; // À ajuster selon les données Apple
+    const { email } = req.body;
     if (!email) {
       return res.status(400).json({ error: "Email requis" });
     }

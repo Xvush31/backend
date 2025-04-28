@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const TronWeb = require("tronweb");
 require("dotenv").config();
-const authRoutes = require("./routes/auth");
+const authRoutes = require("../routes/auth");
 
 const app = express();
 
