@@ -1,7 +1,7 @@
 const express = require("express");
 const mysql = require("mysql2/promise");
 const jwt = require("jsonwebtoken");
-const bcrypt = require("bcrypt"); // Ajoute bcrypt
+const bcrypt = require("bcryptjs"); // Ajoute bcrypt
 const { OAuth2Client } = require("google-auth-library");
 require("dotenv").config();
 
